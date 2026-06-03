@@ -7,6 +7,12 @@ A Python/PyQt5 desktop application that listens for UDP broadcasts from a [Weath
 
 ---
 
+## Screenshot
+
+![TempestDot displaying live weather data](tempest_display-screenshot.png)
+
+---
+
 ## Requirements
 
 - Python 3.9 or later
@@ -125,7 +131,8 @@ All values are stored internally in SI units (m/s, °C, hPa, mm) and converted t
 |---|---|
 | `tempest_display.py` | Main application |
 | `install_tempest.ps1` | Windows installer (Python + PyQt5 + optional desktop shortcut) |
-| `tempest_README.md` | This file |
+| `README.md` | This file |
+| `tempest_display-screenshot.png` | Screenshot shown above |
 
 ---
 
