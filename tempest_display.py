@@ -219,7 +219,14 @@ class TempestWidget(QWidget):
         # bounding rects updated each paint
         self._toggle_rect   = QRectF(8, 30, 80, 18)
         self._shortcut_rect = QRectF(8, 8, 18, 18)
-        self._shortcut_flash = 0   # frames to show confirmation colour
+        self._startup_rect  = QRectF(30, 8, 18, 18)
+        self._shortcut_flash = 0
+        self._startup_flash  = 0
+
+        # Use pythonw.exe so shortcuts launch without a console window
+        self._pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+        if not os.path.exists(self._pythonw):
+            self._pythonw = sys.executable
 
     # ── Input handling ────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
@@ -230,83 +237,111 @@ class TempestWidget(QWidget):
     def mousePressEvent(self, event):
         if self._shortcut_rect.contains(event.pos()):
             self._create_shortcut()
+        elif self._startup_rect.contains(event.pos()):
+            self._create_startup()
         elif self._toggle_rect.contains(event.pos()):
             self.state.metric = not self.state.metric
             self.update()
 
-    def _create_shortcut(self):
-        python_exe = sys.executable
-        script     = os.path.abspath(__file__)
-        # Use PowerShell to resolve the real Desktop path — handles OneDrive
-        # redirection and custom shell folder locations correctly.
-        desktop = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "[Environment]::GetFolderPath('Desktop')"],
-            capture_output=True, text=True, check=True
-        ).stdout.strip()
-        lnk_path   = os.path.join(desktop, "Tempest Display.lnk")
-        ps = (
+    # ── shared popup stylesheet ───────────────────────────────────────────────
+    @staticmethod
+    def _popup_ss():
+        return """
+            QMessageBox { background-color: #1a0a2e; color: #ffffff; }
+            QMessageBox QLabel { color: #ffffff; font-size: 11px; }
+            QMessageBox QPushButton {
+                background-color: #332255; color: #00e0ff;
+                border: 1px solid #443366; border-radius: 4px;
+                padding: 4px 18px; font-weight: bold;
+            }
+            QMessageBox QPushButton:hover { background-color: #443366; }
+        """
+
+    def _make_lnk(self, lnk_path):
+        """Build the PowerShell snippet that creates a .lnk at lnk_path."""
+        script = os.path.abspath(__file__)
+        return (
             f'$wsh = New-Object -ComObject WScript.Shell; '
             f'$s = $wsh.CreateShortcut("{lnk_path}"); '
-            f'$s.TargetPath = "{python_exe}"; '
+            f'$s.TargetPath = "{self._pythonw}"; '
             f'$s.Arguments = \'"{script}"\'; '
             f'$s.WorkingDirectory = "{os.path.dirname(script)}"; '
             f'$s.Description = "Tempest Weather Station Display"; '
             f'$s.Save()'
         )
-        popup_ss = """
-            QMessageBox {
-                background-color: #1a0a2e;
-                color: #ffffff;
-            }
-            QMessageBox QLabel {
-                color: #ffffff;
-                font-size: 11px;
-            }
-            QMessageBox QPushButton {
-                background-color: #332255;
-                color: #00e0ff;
-                border: 1px solid #443366;
-                border-radius: 4px;
-                padding: 4px 18px;
-                font-weight: bold;
-            }
-            QMessageBox QPushButton:hover {
-                background-color: #443366;
-            }
-        """
+
+    def _show_popup(self, title, ok_text, detail_rows, flash_attr, success):
+        msg = QMessageBox(self)
+        msg.setStyleSheet(self._popup_ss())
+        msg.setWindowTitle(title)
+        msg.setIcon(QMessageBox.NoIcon)
+        if success:
+            msg.setText(f"<span style='color:#00e0ff;font-size:13px;font-weight:bold;'>"
+                        f"✔  {ok_text}</span>")
+            rows = "".join(
+                f"<tr><td style='color:#ff40a0;'><b>{k}</b></td>"
+                f"<td>&nbsp;{v}</td></tr>"
+                for k, v in detail_rows
+            )
+            msg.setInformativeText(
+                f"<table cellspacing='5' style='color:#cccccc;font-size:11px;'>"
+                f"{rows}</table>"
+            )
+        else:
+            msg.setText(f"<span style='color:#ff4040;font-size:13px;font-weight:bold;'>"
+                        f"✖  {ok_text}</span>")
+            msg.setInformativeText(
+                f"<span style='color:#cccccc;'>{detail_rows}</span>")
+        setattr(self, flash_attr, 6 if success else -6)
+        msg.exec_()
+        self.update()
+
+    def _create_shortcut(self):
+        script     = os.path.abspath(__file__)
+        desktop = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "[Environment]::GetFolderPath('Desktop')"],
+            capture_output=True, text=True, check=True
+        ).stdout.strip()
+        lnk_path = os.path.join(desktop, "Tempest Display.lnk")
+        ps = self._make_lnk(lnk_path)
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                            check=True, capture_output=True)
-            self._shortcut_flash = 6
-            msg = QMessageBox(self)
-            msg.setStyleSheet(popup_ss)
-            msg.setWindowTitle("Shortcut Created")
-            msg.setIcon(QMessageBox.NoIcon)
-            msg.setText("<span style='color:#00e0ff; font-size:13px; font-weight:bold;'>"
-                        "✔  Desktop shortcut created successfully.</span>")
-            msg.setInformativeText(
-                f"<table cellspacing='5' style='color:#cccccc; font-size:11px;'>"
-                f"<tr><td style='color:#ff40a0;'><b>Shortcut</b></td>"
-                f"    <td>&nbsp;{lnk_path}</td></tr>"
-                f"<tr><td style='color:#ff40a0;'><b>Launches</b></td>"
-                f"    <td>&nbsp;{python_exe}</td></tr>"
-                f"<tr><td style='color:#ff40a0;'><b>Script</b></td>"
-                f"    <td>&nbsp;{script}</td></tr>"
-                f"</table>"
-            )
-            msg.exec_()
+            self._show_popup("Shortcut Created",
+                             "Desktop shortcut created successfully.",
+                             [("Shortcut", lnk_path),
+                              ("Launches", self._pythonw),
+                              ("Script",   script)],
+                             "_shortcut_flash", True)
         except Exception as e:
-            self._shortcut_flash = -6
-            msg = QMessageBox(self)
-            msg.setStyleSheet(popup_ss)
-            msg.setWindowTitle("Shortcut Failed")
-            msg.setIcon(QMessageBox.NoIcon)
-            msg.setText("<span style='color:#ff4040; font-size:13px; font-weight:bold;'>"
-                        "✖  Could not create the desktop shortcut.</span>")
-            msg.setInformativeText(f"<span style='color:#cccccc;'>{e}</span>")
-            msg.exec_()
-        self.update()
+            self._show_popup("Shortcut Failed",
+                             "Could not create the desktop shortcut.",
+                             str(e), "_shortcut_flash", False)
+
+    def _create_startup(self):
+        script = os.path.abspath(__file__)
+        startup_dir = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "[Environment]::GetFolderPath('Startup')"],
+            capture_output=True, text=True, check=True
+        ).stdout.strip()
+        lnk_path = os.path.join(startup_dir, "TempestDot.lnk")
+        ps = self._make_lnk(lnk_path)
+        try:
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           check=True, capture_output=True)
+            self._show_popup("Auto-start Enabled",
+                             "TempestDot will now start with Windows.",
+                             [("Startup folder", startup_dir),
+                              ("Shortcut",       lnk_path),
+                              ("Launches",       self._pythonw),
+                              ("Script",         script)],
+                             "_startup_flash", True)
+        except Exception as e:
+            self._show_popup("Auto-start Failed",
+                             "Could not add to the Startup folder.",
+                             str(e), "_startup_flash", False)
 
     # ── Paint ─────────────────────────────────────────────────────────────────
     def paintEvent(self, _):
@@ -328,44 +363,50 @@ class TempestWidget(QWidget):
     def _draw_header(self, p, y):
         W = self.width()
 
-        # ── Pin / shortcut icon ──
-        icon_x, icon_y, icon_sz = 8, y, 18
+        icon_sz = 18
+
+        # ── Monitor / desktop shortcut icon ──────────────────────────────────
+        icon_x, icon_y = 8, y
         self._shortcut_rect = QRectF(icon_x, icon_y, icon_sz, icon_sz)
-
-        if self._shortcut_flash > 0:
-            icon_color = GREEN       # success flash
-        elif self._shortcut_flash < 0:
-            icon_color = PINK        # error flash
-        else:
-            icon_color = GREY        # idle
-
+        sc = GREEN if self._shortcut_flash > 0 else (PINK if self._shortcut_flash < 0 else GREY)
         if self._shortcut_flash != 0:
             self._shortcut_flash += 1 if self._shortcut_flash < 0 else -1
-
-        # Draw a small monitor + arrow shortcut icon
-        p.setRenderHint(QPainter.Antialiasing)
-        cx = icon_x + icon_sz / 2
-        cy = icon_y + icon_sz / 2 - 1
-
-        # screen body
-        p.setPen(QPen(icon_color, 1.5))
-        p.setBrush(Qt.NoBrush)
+        cx, cy = icon_x + icon_sz / 2, icon_y + icon_sz / 2 - 1
+        p.setPen(QPen(sc, 1.5)); p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(int(cx - 7), int(cy - 5), 14, 10, 2, 2)
-        # stand stem
         p.drawLine(int(cx), int(cy + 5), int(cx), int(cy + 8))
-        # stand base
         p.drawLine(int(cx - 4), int(cy + 8), int(cx + 4), int(cy + 8))
-        # tiny shortcut arrow in bottom-right of screen
-        p.setPen(QPen(icon_color, 1))
+        p.setPen(QPen(sc, 1))
         p.drawLine(int(cx + 1), int(cy + 2), int(cx + 5), int(cy - 2))
         p.drawLine(int(cx + 2), int(cy - 2), int(cx + 5), int(cy - 2))
         p.drawLine(int(cx + 5), int(cy - 2), int(cx + 5), int(cy + 1))
 
-        # Row 1: serial to the right of the icon, Tempest° on the right
+        # ── Startup / autostart icon (clock with up-arrow) ────────────────────
+        su_x = icon_x + icon_sz + 4
+        self._startup_rect = QRectF(su_x, icon_y, icon_sz, icon_sz)
+        su = GREEN if self._startup_flash > 0 else (PINK if self._startup_flash < 0 else GREY)
+        if self._startup_flash != 0:
+            self._startup_flash += 1 if self._startup_flash < 0 else -1
+        scx, scy = su_x + icon_sz / 2, icon_y + icon_sz / 2
+        # clock circle
+        p.setPen(QPen(su, 1.5)); p.setBrush(Qt.NoBrush)
+        p.drawEllipse(QPointF(scx, scy), 7, 7)
+        # clock hands (showing ~8 o'clock as "startup" hint)
+        p.setPen(QPen(su, 1.5))
+        p.drawLine(int(scx), int(scy), int(scx), int(scy - 4))       # 12 hand
+        p.drawLine(int(scx), int(scy), int(scx + 3), int(scy + 2))   # 3 hand
+        # small up-arrow on top-right of clock
+        p.setPen(QPen(CYAN, 1.5))
+        ax, ay = int(scx + 5), int(scy - 5)
+        p.drawLine(ax, ay + 4, ax, ay)
+        p.drawLine(ax - 2, ay + 2, ax, ay)
+        p.drawLine(ax + 2, ay + 2, ax, ay)
+
+        # Row 1: serial to the right of both icons
         serial = self.state.serial or "Tempest Station"
         p.setFont(QFont("Arial", 9))
         p.setPen(QPen(GREY))
-        p.drawText(icon_x + icon_sz + 4, y, W - icon_sz - 30, 18,
+        p.drawText(su_x + icon_sz + 4, y, W - su_x - icon_sz - 30, 18,
                    Qt.AlignLeft | Qt.AlignVCenter, serial)
 
         p.setFont(QFont("Arial", 22, QFont.Bold))
