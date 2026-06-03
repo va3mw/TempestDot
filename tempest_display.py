@@ -6,13 +6,15 @@ Requires: pip install PyQt5
 """
 
 import sys
+import os
 import json
 import socket
+import subprocess
 import threading
 import math
 import time
 from datetime import datetime
-from PyQt5.QtWidgets import QApplication, QWidget
+from PyQt5.QtWidgets import QApplication, QWidget, QToolTip
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QRectF, QPointF
 from PyQt5.QtGui import (QPainter, QColor, QFont, QPen, QBrush,
                           QPainterPath)
@@ -214,8 +216,10 @@ class TempestWidget(QWidget):
         self.setStyleSheet(f"background-color: {bg};")
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # bounding rect of the unit toggle button (updated each paint)
-        self._toggle_rect = QRectF(8, 30, 80, 18)
+        # bounding rects updated each paint
+        self._toggle_rect   = QRectF(8, 30, 80, 18)
+        self._shortcut_rect = QRectF(8, 8, 18, 18)
+        self._shortcut_flash = 0   # frames to show confirmation colour
 
     # ── Input handling ────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
@@ -224,9 +228,33 @@ class TempestWidget(QWidget):
             self.update()
 
     def mousePressEvent(self, event):
-        if self._toggle_rect.contains(event.pos()):
+        if self._shortcut_rect.contains(event.pos()):
+            self._create_shortcut()
+        elif self._toggle_rect.contains(event.pos()):
             self.state.metric = not self.state.metric
             self.update()
+
+    def _create_shortcut(self):
+        python_exe = sys.executable
+        script     = os.path.abspath(__file__)
+        desktop    = os.path.join(os.path.expanduser("~"), "Desktop")
+        lnk_path   = os.path.join(desktop, "Tempest Display.lnk")
+        ps = (
+            f'$wsh = New-Object -ComObject WScript.Shell; '
+            f'$s = $wsh.CreateShortcut("{lnk_path}"); '
+            f'$s.TargetPath = "{python_exe}"; '
+            f'$s.Arguments = \'"{script}"\'; '
+            f'$s.WorkingDirectory = "{os.path.dirname(script)}"; '
+            f'$s.Description = "Tempest Weather Station Display"; '
+            f'$s.Save()'
+        )
+        try:
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           check=True, capture_output=True)
+            self._shortcut_flash = 6   # show green for ~6 repaints
+        except Exception:
+            self._shortcut_flash = -6  # show red for ~6 repaints
+        self.update()
 
     # ── Paint ─────────────────────────────────────────────────────────────────
     def paintEvent(self, _):
@@ -248,17 +276,51 @@ class TempestWidget(QWidget):
     def _draw_header(self, p, y):
         W = self.width()
 
-        # Row 1: serial left, Tempest° right
+        # ── Pin / shortcut icon ──
+        icon_x, icon_y, icon_sz = 8, y, 18
+        self._shortcut_rect = QRectF(icon_x, icon_y, icon_sz, icon_sz)
+
+        if self._shortcut_flash > 0:
+            icon_color = GREEN       # success flash
+        elif self._shortcut_flash < 0:
+            icon_color = PINK        # error flash
+        else:
+            icon_color = GREY        # idle
+
+        if self._shortcut_flash != 0:
+            self._shortcut_flash += 1 if self._shortcut_flash < 0 else -1
+
+        # Draw a small monitor + arrow shortcut icon
+        p.setRenderHint(QPainter.Antialiasing)
+        cx = icon_x + icon_sz / 2
+        cy = icon_y + icon_sz / 2 - 1
+
+        # screen body
+        p.setPen(QPen(icon_color, 1.5))
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(int(cx - 7), int(cy - 5), 14, 10, 2, 2)
+        # stand stem
+        p.drawLine(int(cx), int(cy + 5), int(cx), int(cy + 8))
+        # stand base
+        p.drawLine(int(cx - 4), int(cy + 8), int(cx + 4), int(cy + 8))
+        # tiny shortcut arrow in bottom-right of screen
+        p.setPen(QPen(icon_color, 1))
+        p.drawLine(int(cx + 1), int(cy + 2), int(cx + 5), int(cy - 2))
+        p.drawLine(int(cx + 2), int(cy - 2), int(cx + 5), int(cy - 2))
+        p.drawLine(int(cx + 5), int(cy - 2), int(cx + 5), int(cy + 1))
+
+        # Row 1: serial to the right of the icon, Tempest° on the right
         serial = self.state.serial or "Tempest Station"
         p.setFont(QFont("Arial", 9))
         p.setPen(QPen(GREY))
-        p.drawText(10, y, W - 20, 18, Qt.AlignLeft | Qt.AlignVCenter, serial)
+        p.drawText(icon_x + icon_sz + 4, y, W - icon_sz - 30, 18,
+                   Qt.AlignLeft | Qt.AlignVCenter, serial)
 
         p.setFont(QFont("Arial", 22, QFont.Bold))
         p.setPen(QPen(WHITE))
         p.drawText(0, y, W - 8, 26, Qt.AlignRight | Qt.AlignVCenter, "Tempest°")
 
-        # Row 2: unit toggle pill — left side, clear of the title
+        # Row 2: unit toggle pill
         ty = y + 28
         btn_w = 84
         r = QRectF(8, ty, btn_w, 17)

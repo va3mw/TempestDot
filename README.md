@@ -53,6 +53,14 @@ python tempest_display.py
 
 The display starts immediately with demo data. As soon as your Tempest station broadcasts a UDP packet it will switch to live data. The station serial number (e.g. `ST-00057478`) appears in the top-left corner once the first packet is received.
 
+### Desktop shortcut
+
+Click the **monitor icon** in the top-left corner (to the left of the station serial number) to create a desktop shortcut that launches TempestDot directly.
+
+- The icon flashes **green** briefly on success, or **red** if the shortcut could not be created.
+- The shortcut is placed on your Windows Desktop as **"Tempest Display.lnk"**.
+- Requires Windows (uses PowerShell's `WScript.Shell` to create the `.lnk` file).
+
 ### Unit toggle
 
 Press **M** or click the **● METRIC / ● IMPERIAL** button to switch between unit systems at any time.
