@@ -508,10 +508,10 @@ class TempestWidget(QWidget):
         p.drawEllipse(QPointF(cx2, cy2), 4, 4)
 
         p.setFont(QFont("Arial", 8)); p.setPen(QPen(WHITE))
-        p.drawText(int(cx2-30), int(cy2+r2+8), 60, 14, Qt.AlignHCenter,
+        p.drawText(int(cx2-30), int(cy2+r2+24), 60, 14, Qt.AlignHCenter,
                    f"{self.state.wind_display} {self.state.wind_unit}")
 
-        return y + 138
+        return y + 150
 
     # ── Wind & gust scale ─────────────────────────────────────────────────────
     def _draw_wind_gust_scale(self, p, y):
