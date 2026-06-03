@@ -248,29 +248,57 @@ class TempestWidget(QWidget):
             f'$s.Description = "Tempest Weather Station Display"; '
             f'$s.Save()'
         )
+        popup_ss = """
+            QMessageBox {
+                background-color: #1a0a2e;
+                color: #ffffff;
+            }
+            QMessageBox QLabel {
+                color: #ffffff;
+                font-size: 11px;
+            }
+            QMessageBox QPushButton {
+                background-color: #332255;
+                color: #00e0ff;
+                border: 1px solid #443366;
+                border-radius: 4px;
+                padding: 4px 18px;
+                font-weight: bold;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #443366;
+            }
+        """
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                            check=True, capture_output=True)
             self._shortcut_flash = 6
             msg = QMessageBox(self)
+            msg.setStyleSheet(popup_ss)
             msg.setWindowTitle("Shortcut Created")
-            msg.setIcon(QMessageBox.Information)
-            msg.setText("<b>Desktop shortcut created successfully.</b>")
+            msg.setIcon(QMessageBox.NoIcon)
+            msg.setText("<span style='color:#00e0ff; font-size:13px; font-weight:bold;'>"
+                        "✔  Desktop shortcut created successfully.</span>")
             msg.setInformativeText(
-                f"<table cellspacing='4'>"
-                f"<tr><td><b>Shortcut&nbsp;</b></td><td>{lnk_path}</td></tr>"
-                f"<tr><td><b>Launches&nbsp;</b></td><td>{python_exe}</td></tr>"
-                f"<tr><td><b>Script&nbsp;</b></td><td>{script}</td></tr>"
+                f"<table cellspacing='5' style='color:#cccccc; font-size:11px;'>"
+                f"<tr><td style='color:#ff40a0;'><b>Shortcut</b></td>"
+                f"    <td>&nbsp;{lnk_path}</td></tr>"
+                f"<tr><td style='color:#ff40a0;'><b>Launches</b></td>"
+                f"    <td>&nbsp;{python_exe}</td></tr>"
+                f"<tr><td style='color:#ff40a0;'><b>Script</b></td>"
+                f"    <td>&nbsp;{script}</td></tr>"
                 f"</table>"
             )
             msg.exec_()
         except Exception as e:
             self._shortcut_flash = -6
             msg = QMessageBox(self)
+            msg.setStyleSheet(popup_ss)
             msg.setWindowTitle("Shortcut Failed")
-            msg.setIcon(QMessageBox.Critical)
-            msg.setText("<b>Could not create the desktop shortcut.</b>")
-            msg.setInformativeText(str(e))
+            msg.setIcon(QMessageBox.NoIcon)
+            msg.setText("<span style='color:#ff4040; font-size:13px; font-weight:bold;'>"
+                        "✖  Could not create the desktop shortcut.</span>")
+            msg.setInformativeText(f"<span style='color:#cccccc;'>{e}</span>")
             msg.exec_()
         self.update()
 
