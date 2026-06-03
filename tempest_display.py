@@ -237,7 +237,13 @@ class TempestWidget(QWidget):
     def _create_shortcut(self):
         python_exe = sys.executable
         script     = os.path.abspath(__file__)
-        desktop    = os.path.join(os.path.expanduser("~"), "Desktop")
+        # Use PowerShell to resolve the real Desktop path — handles OneDrive
+        # redirection and custom shell folder locations correctly.
+        desktop = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "[Environment]::GetFolderPath('Desktop')"],
+            capture_output=True, text=True, check=True
+        ).stdout.strip()
         lnk_path   = os.path.join(desktop, "Tempest Display.lnk")
         ps = (
             f'$wsh = New-Object -ComObject WScript.Shell; '
