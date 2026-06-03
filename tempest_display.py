@@ -13,6 +13,7 @@ import subprocess
 import threading
 import math
 import time
+import winreg
 from datetime import datetime
 from PyQt5.QtWidgets import QApplication, QWidget, QMessageBox
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QRectF, QPointF
@@ -243,6 +244,27 @@ class TempestWidget(QWidget):
             self.state.metric = not self.state.metric
             self.update()
 
+    # ── shell folder resolution via registry (handles OneDrive redirection) ──
+    @staticmethod
+    def _shell_folder(name):
+        """
+        Read the user's actual shell folder path from the registry.
+        'User Shell Folders' stores what Windows *actually* uses, including
+        OneDrive-redirected paths, unlike GetFolderPath which can lag behind.
+        Falls back to 'Shell Folders' (the resolved cache) if not found.
+        """
+        for key_name in (
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+        ):
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_name) as k:
+                    raw, _ = winreg.QueryValueEx(k, name)
+                    return os.path.expandvars(raw)   # expand %USERPROFILE% etc.
+            except FileNotFoundError:
+                continue
+        raise RuntimeError(f"Could not resolve shell folder: {name}")
+
     # ── shared popup stylesheet ───────────────────────────────────────────────
     @staticmethod
     def _popup_ss():
@@ -297,12 +319,8 @@ class TempestWidget(QWidget):
         self.update()
 
     def _create_shortcut(self):
-        script     = os.path.abspath(__file__)
-        desktop = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "[Environment]::GetFolderPath('Desktop')"],
-            capture_output=True, text=True, check=True
-        ).stdout.strip()
+        script   = os.path.abspath(__file__)
+        desktop  = self._shell_folder("Desktop")
         lnk_path = os.path.join(desktop, "Tempest Display.lnk")
         ps = self._make_lnk(lnk_path)
         try:
@@ -320,13 +338,9 @@ class TempestWidget(QWidget):
                              str(e), "_shortcut_flash", False)
 
     def _create_startup(self):
-        script = os.path.abspath(__file__)
-        startup_dir = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "[Environment]::GetFolderPath('Startup')"],
-            capture_output=True, text=True, check=True
-        ).stdout.strip()
-        lnk_path = os.path.join(startup_dir, "TempestDot.lnk")
+        script      = os.path.abspath(__file__)
+        startup_dir = self._shell_folder("Startup")
+        lnk_path    = os.path.join(startup_dir, "TempestDot.lnk")
         ps = self._make_lnk(lnk_path)
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", ps],
