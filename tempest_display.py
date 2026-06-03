@@ -14,7 +14,7 @@ import threading
 import math
 import time
 from datetime import datetime
-from PyQt5.QtWidgets import QApplication, QWidget, QToolTip
+from PyQt5.QtWidgets import QApplication, QWidget, QMessageBox
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QRectF, QPointF
 from PyQt5.QtGui import (QPainter, QColor, QFont, QPen, QBrush,
                           QPainterPath)
@@ -251,9 +251,27 @@ class TempestWidget(QWidget):
         try:
             subprocess.run(["powershell", "-NoProfile", "-Command", ps],
                            check=True, capture_output=True)
-            self._shortcut_flash = 6   # show green for ~6 repaints
-        except Exception:
-            self._shortcut_flash = -6  # show red for ~6 repaints
+            self._shortcut_flash = 6
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Shortcut Created")
+            msg.setIcon(QMessageBox.Information)
+            msg.setText("<b>Desktop shortcut created successfully.</b>")
+            msg.setInformativeText(
+                f"<table cellspacing='4'>"
+                f"<tr><td><b>Shortcut&nbsp;</b></td><td>{lnk_path}</td></tr>"
+                f"<tr><td><b>Launches&nbsp;</b></td><td>{python_exe}</td></tr>"
+                f"<tr><td><b>Script&nbsp;</b></td><td>{script}</td></tr>"
+                f"</table>"
+            )
+            msg.exec_()
+        except Exception as e:
+            self._shortcut_flash = -6
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Shortcut Failed")
+            msg.setIcon(QMessageBox.Critical)
+            msg.setText("<b>Could not create the desktop shortcut.</b>")
+            msg.setInformativeText(str(e))
+            msg.exec_()
         self.update()
 
     # ── Paint ─────────────────────────────────────────────────────────────────
