@@ -13,6 +13,84 @@ A Python/PyQt5 desktop application that listens for UDP broadcasts from a [Weath
 
 ---
 
+## Getting started
+
+Follow these steps from a fresh Windows PC to a running app with a desktop shortcut.
+
+### Step 1 — Download TempestDot
+
+[Download the ZIP from GitHub](https://github.com/va3mw/TempestDot/archive/refs/heads/master.zip), extract it to a folder of your choice (e.g. `C:\TempestDot`), and open that folder in File Explorer.
+
+### Step 2 — Run the installer
+
+Right-click **`install_tempest.ps1`** and choose **Run with PowerShell**, or open PowerShell and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "install_tempest.ps1"
+```
+
+The installer walks you through four steps, asking your permission before doing anything:
+
+| Step | What it does |
+|---|---|
+| **1 — Python** | Checks for Python 3.9+. If not found, offers to download and install Python 3.12 from python.org (~25 MB, current user only, no admin required). |
+| **2 — PyQt5** | Checks for the PyQt5 GUI library. If not found, installs it via pip (~60 MB). |
+| **3 — Desktop shortcut** | Asks if you want a **"Tempest Display"** shortcut placed on your Desktop. |
+| **4 — Start with Windows** | Asks if you want TempestDot to **launch automatically** every time you log in to Windows (see below). |
+
+### Step 3 — Launch
+
+Double-click the **Tempest Display** shortcut on your Desktop, or run:
+
+```bash
+python tempest_display.py
+```
+
+The display starts with demo data immediately. Once your Tempest station broadcasts a UDP packet on your local network the display switches to live data and shows your station serial number (e.g. `ST-00057478`) in the top-left corner.
+
+---
+
+## Desktop shortcut
+
+If you skipped the installer or want to re-pin the app, click the **monitor icon** in the top-left corner of the display window (to the left of the station serial number).
+
+- Flashes **green** briefly on success.
+- Flashes **red** if the shortcut could not be created (e.g. Desktop path not found).
+- Places **"Tempest Display.lnk"** on your Windows Desktop.
+
+---
+
+## Starting automatically with Windows
+
+The installer (Step 4) can add TempestDot to your personal **Startup** folder so it launches every time you log in — no Task Scheduler or admin rights required.
+
+**To enable manually** (if you skipped the installer step), open PowerShell and run:
+
+```powershell
+$python  = (python -c "import sys; print(sys.executable)")
+$script  = "C:\TempestDot\tempest_display.py"   # adjust path if needed
+$startup = [Environment]::GetFolderPath("Startup")
+$wsh     = New-Object -ComObject WScript.Shell
+$link    = $wsh.CreateShortcut("$startup\TempestDot.lnk")
+$link.TargetPath       = $python
+$link.Arguments        = "`"$script`""
+$link.WorkingDirectory = Split-Path $script
+$link.Save()
+Write-Host "Auto-start enabled."
+```
+
+**To disable auto-start**, delete the startup shortcut:
+
+```powershell
+Remove-Item "$([Environment]::GetFolderPath('Startup'))\TempestDot.lnk"
+```
+
+Or navigate to the Startup folder manually:
+1. Press **Win + R**, type `shell:startup`, press Enter.
+2. Delete **TempestDot.lnk**.
+
+---
+
 ## Requirements
 
 - Python 3.9 or later
@@ -21,45 +99,7 @@ A Python/PyQt5 desktop application that listens for UDP broadcasts from a [Weath
 
 ---
 
-## Installation
-
-### Option 1 — Automatic installer (Windows)
-
-Run the included PowerShell installer. It will ask your permission before installing anything:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "install_tempest.ps1"
-```
-
-The installer will:
-1. Check for Python 3.9+ and offer to download it from python.org if not found
-2. Check for PyQt5 and install it via pip if needed
-3. Optionally create a desktop shortcut
-
-### Option 2 — Manual install
-
-```bash
-pip install PyQt5
-python tempest_display.py
-```
-
----
-
 ## Usage
-
-```bash
-python tempest_display.py
-```
-
-The display starts immediately with demo data. As soon as your Tempest station broadcasts a UDP packet it will switch to live data. The station serial number (e.g. `ST-00057478`) appears in the top-left corner once the first packet is received.
-
-### Desktop shortcut
-
-Click the **monitor icon** in the top-left corner (to the left of the station serial number) to create a desktop shortcut that launches TempestDot directly.
-
-- The icon flashes **green** briefly on success, or **red** if the shortcut could not be created.
-- The shortcut is placed on your Windows Desktop as **"Tempest Display.lnk"**.
-- Requires Windows (uses PowerShell's `WScript.Shell` to create the `.lnk` file).
 
 ### Unit toggle
 

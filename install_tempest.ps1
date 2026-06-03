@@ -2,8 +2,9 @@
 <#
 .SYNOPSIS
     Tempest Weather Station Display — installer
-    Installs Python 3.12 (if needed) and the PyQt5 package, then offers
-    to create a desktop shortcut.  Every step asks for your permission first.
+    Installs Python 3.12 (if needed) and the PyQt5 package, creates a
+    desktop shortcut, and optionally sets the app to start with Windows.
+    Every step asks for your permission first.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -152,19 +153,19 @@ if ($pyqt5Check -eq "ok") {
 }
 
 # ── Step 3: Desktop shortcut ──────────────────────────────────────────────────
-Write-Header "Step 3 of 3 — Desktop shortcut"
+Write-Header "Step 3 of 4 — Desktop shortcut"
+
+$pythonExe = (& $pythonCmd -c "import sys; print(sys.executable)").Trim()
+$shortcutPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "Tempest Display.lnk"
 
 if (-not (Test-Path $AppScript)) {
     Write-Host "  tempest_display.py not found at: $AppScript" -ForegroundColor Yellow
     Write-Host "  Skipping shortcut creation." -ForegroundColor Yellow
 } else {
-    Write-Host "  Create a desktop shortcut to launch $AppName?" -ForegroundColor White
+    Write-Host "  A shortcut named 'Tempest Display' will be placed on your Desktop." -ForegroundColor White
     Write-Host ""
 
     if (Ask-YesNo "Create desktop shortcut?") {
-        $pythonExe = (& $pythonCmd -c "import sys; print(sys.executable)").Trim()
-        $shortcutPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "Tempest Display.lnk"
-
         $wsh  = New-Object -ComObject WScript.Shell
         $link = $wsh.CreateShortcut($shortcutPath)
         $link.TargetPath       = $pythonExe
@@ -173,19 +174,51 @@ if (-not (Test-Path $AppScript)) {
         $link.Description      = $AppName
         $link.Save()
 
-        Write-Host "  Shortcut created on your Desktop." -ForegroundColor Green
+        Write-Host "  Shortcut created: $shortcutPath" -ForegroundColor Green
     } else {
         Write-Host "  Skipped." -ForegroundColor Gray
-        Write-Host "  To run manually:  python `"$AppScript`"" -ForegroundColor Gray
     }
+}
+
+# ── Step 4: Start with Windows ────────────────────────────────────────────────
+Write-Header "Step 4 of 4 — Start with Windows (optional)"
+
+Write-Host "  Would you like TempestDot to launch automatically when you log in?" -ForegroundColor White
+Write-Host ""
+Write-Host "  This adds a shortcut to your personal Startup folder:" -ForegroundColor Gray
+Write-Host "  $([Environment]::GetFolderPath('Startup'))" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  You can undo this at any time — see the README for instructions." -ForegroundColor Gray
+Write-Host ""
+
+if (Ask-YesNo "Start TempestDot automatically when Windows starts?") {
+    $startupDir  = [Environment]::GetFolderPath("Startup")
+    $startupLink = Join-Path $startupDir "TempestDot.lnk"
+
+    $wsh  = New-Object -ComObject WScript.Shell
+    $link = $wsh.CreateShortcut($startupLink)
+    $link.TargetPath       = $pythonExe
+    $link.Arguments        = "`"$AppScript`""
+    $link.WorkingDirectory = $ScriptDir
+    $link.Description      = $AppName
+    $link.Save()
+
+    Write-Host "  Auto-start enabled." -ForegroundColor Green
+    Write-Host "  Startup shortcut: $startupLink" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  To disable auto-start later, delete that file or run:" -ForegroundColor Gray
+    Write-Host "  Remove-Item `"$startupLink`"" -ForegroundColor DarkGray
+} else {
+    Write-Host "  Skipped — TempestDot will only launch when you open it manually." -ForegroundColor Gray
 }
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
-Write-Host "  Installation complete!" -ForegroundColor Green
+Write-Host "  All done!  TempestDot is ready to use." -ForegroundColor Green
 Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Green
 Write-Host ""
-Write-Host "  To launch:  python `"$AppScript`"" -ForegroundColor White
-Write-Host "  Toggle units: press M or click METRIC / IMPERIAL button" -ForegroundColor Gray
+Write-Host "  Launch now:     python `"$AppScript`"" -ForegroundColor White
+Write-Host "  Toggle units:   press M  or click the METRIC / IMPERIAL button" -ForegroundColor Gray
+Write-Host "  Desktop icon:   click the monitor icon (top-left) to pin to Desktop" -ForegroundColor Gray
 Write-Host ""
