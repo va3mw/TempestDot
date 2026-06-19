@@ -701,6 +701,8 @@ def main():
     timer.timeout.connect(widget.update)
     timer.start(1000)
 
+    screen = app.primaryScreen().geometry()
+    widget.setGeometry(screen)
     widget.showFullScreen()
     sys.exit(app.exec_())
 
