@@ -1,21 +1,19 @@
 """
 Tempest Weather Station Display
 Listens for UDP broadcasts on port 50222 and renders a LightMap-style GUI.
-Press M or click the unit toggle to switch Metric / Imperial.
-Requires: pip install PyQt5
+Press M or tap the unit toggle to switch Metric / Imperial.
+Requires: python3-pyqt5
 """
 
 import sys
 import os
 import json
 import socket
-import subprocess
 import threading
 import math
 import time
-import winreg
 from datetime import datetime
-from PyQt5.QtWidgets import QApplication, QWidget, QMessageBox
+from PyQt5.QtWidgets import QApplication, QWidget
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QRectF, QPointF
 from PyQt5.QtGui import (QPainter, QColor, QFont, QPen, QBrush,
                           QPainterPath)
@@ -63,26 +61,22 @@ class TempestListener(QObject):
 # ══════════════════════════════════════════════════════════════════════════════
 class WeatherState:
     def __init__(self):
-        # SI storage
-        self.wind_ms       = 0.0    # m/s
-        self.gust_ms       = 0.0    # m/s
-        self.wind_dir      = 0      # degrees
-        self.temp_c        = 20.0   # °C
-        self.humidity      = 55.0   # %
-        self.pressure_mb   = 1013.0 # hPa / mb
-        self.precip_rate_mmhr = 0.0 # mm/hr
-        self.precip_mm     = 0.0    # mm accumulated
-        self.uv_index      = 0.0
-        self.solar_rad     = 0.0    # W/m²
-        self.conditions    = "clear"
+        self.wind_ms          = 0.0
+        self.gust_ms          = 0.0
+        self.wind_dir         = 0
+        self.temp_c           = 20.0
+        self.humidity         = 55.0
+        self.pressure_mb      = 1013.0
+        self.precip_rate_mmhr = 0.0
+        self.precip_mm        = 0.0
+        self.uv_index         = 0.0
+        self.solar_rad        = 0.0
+        self.conditions       = "clear"
         self.forecast_hour_dots = [0.5] * 12
-        self.serial        = ""     # station serial number
-        self.last_update   = None
+        self.serial           = ""
+        self.last_update      = None
+        self.metric           = True
 
-        # unit system
-        self.metric = True          # False = imperial
-
-    # ── Convenience accessors (return display-unit values) ────────────────────
     @property
     def wind_display(self):
         return round(self.wind_ms * 3.6, 1) if self.metric else round(self.wind_ms * 2.237, 1)
@@ -105,7 +99,6 @@ class WeatherState:
 
     @property
     def pressure_display(self):
-        # metric: mmHg (1 mb = 0.75006 mmHg),  imperial: inHg
         return round(self.pressure_mb * 0.75006, 1) if self.metric else round(self.pressure_mb * 0.02953, 2)
 
     @property
@@ -124,34 +117,24 @@ class WeatherState:
     def precip_unit(self):
         return "mm" if self.metric else "in"
 
-    # ── Ingest UDP message ────────────────────────────────────────────────────
     def ingest(self, msg):
-        t = msg.get("type", "")
+        t  = msg.get("type", "")
         sn = msg.get("serial_number", "")
         if sn and not self.serial:
             self.serial = sn
 
         if t == "obs_st":
             obs = msg.get("obs", [[]])[0]
-            if not sn:
-                sn = msg.get("serial_number", "")
-            if sn:
-                self.serial = sn
             if len(obs) >= 18:
-                # 0=epoch, 1=wind_lull, 2=wind_avg, 3=wind_gust, 4=wind_dir,
-                # 5=sample_interval, 6=pressure(mb), 7=temp(C), 8=humidity,
-                # 9=lux, 10=uv, 11=solar_rad, 12=precip_accum(mm),
-                # 13=precip_type, 14=strike_dist, 15=strike_count,
-                # 16=battery, 17=report_interval
-                if obs[2] is not None: self.wind_ms     = float(obs[2])
-                if obs[3] is not None: self.gust_ms     = float(obs[3])
-                if obs[4] is not None: self.wind_dir    = int(obs[4])
-                if obs[6] is not None: self.pressure_mb = float(obs[6])
-                if obs[7] is not None: self.temp_c      = float(obs[7])
-                if obs[8] is not None: self.humidity    = float(obs[8])
-                if obs[10] is not None: self.uv_index   = float(obs[10])
-                if obs[11] is not None: self.solar_rad  = float(obs[11])
-                if obs[12] is not None: self.precip_mm  = float(obs[12])
+                if obs[2]  is not None: self.wind_ms     = float(obs[2])
+                if obs[3]  is not None: self.gust_ms     = float(obs[3])
+                if obs[4]  is not None: self.wind_dir    = int(obs[4])
+                if obs[6]  is not None: self.pressure_mb = float(obs[6])
+                if obs[7]  is not None: self.temp_c      = float(obs[7])
+                if obs[8]  is not None: self.humidity    = float(obs[8])
+                if obs[10] is not None: self.uv_index    = float(obs[10])
+                if obs[11] is not None: self.solar_rad   = float(obs[11])
+                if obs[12] is not None: self.precip_mm   = float(obs[12])
                 pt = obs[13]
                 if pt == 1:
                     self.conditions = "rain"
@@ -205,162 +188,61 @@ def draw_tick_scale(p, rect, min_val, max_val, value, ticks, color):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Main widget
+# Main widget  —  draws in a fixed 380x760 logical canvas that is then
+# scaled and centred to fill whatever the actual window size is.
 # ══════════════════════════════════════════════════════════════════════════════
+CANVAS_W = 380
+CANVAS_H = 760
+
 class TempestWidget(QWidget):
     def __init__(self, state: WeatherState):
         super().__init__()
         self.state = state
         self.setWindowTitle("Tempest Weather Station")
-        self.setFixedSize(380, 760)
         bg = f"#{BG.red():02x}{BG.green():02x}{BG.blue():02x}"
         self.setStyleSheet(f"background-color: {bg};")
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # bounding rects updated each paint
-        self._toggle_rect   = QRectF(8, 30, 80, 18)
-        self._shortcut_rect = QRectF(8, 8, 18, 18)
-        self._startup_rect  = QRectF(30, 8, 18, 18)
-        self._shortcut_flash = 0
-        self._startup_flash  = 0
+        self._toggle_rect = QRectF(8, 30, 80, 18)  # logical canvas coords
+        self._scale = 1.0
+        self._x_off = 0.0
+        self._y_off = 0.0
 
-        # Use pythonw.exe so shortcuts launch without a console window
-        self._pythonw = sys.executable.replace("python.exe", "pythonw.exe")
-        if not os.path.exists(self._pythonw):
-            self._pythonw = sys.executable
+    def _to_logical(self, pos):
+        lx = (pos.x() - self._x_off) / self._scale
+        ly = (pos.y() - self._y_off) / self._scale
+        return QPointF(lx, ly)
 
-    # ── Input handling ────────────────────────────────────────────────────────
+    # ── Input ─────────────────────────────────────────────────────────────────
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_M:
             self.state.metric = not self.state.metric
             self.update()
+        elif event.key() in (Qt.Key_Q, Qt.Key_Escape):
+            QApplication.quit()
 
     def mousePressEvent(self, event):
-        if self._shortcut_rect.contains(event.pos()):
-            self._create_shortcut()
-        elif self._startup_rect.contains(event.pos()):
-            self._create_startup()
-        elif self._toggle_rect.contains(event.pos()):
+        lpos = self._to_logical(event.pos())
+        if self._toggle_rect.contains(lpos):
             self.state.metric = not self.state.metric
             self.update()
-
-    # ── shell folder resolution via registry (handles OneDrive redirection) ──
-    @staticmethod
-    def _shell_folder(name):
-        """
-        Read the user's actual shell folder path from the registry.
-        'User Shell Folders' stores what Windows *actually* uses, including
-        OneDrive-redirected paths, unlike GetFolderPath which can lag behind.
-        Falls back to 'Shell Folders' (the resolved cache) if not found.
-        """
-        for key_name in (
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders",
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
-        ):
-            try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_name) as k:
-                    raw, _ = winreg.QueryValueEx(k, name)
-                    return os.path.expandvars(raw)   # expand %USERPROFILE% etc.
-            except FileNotFoundError:
-                continue
-        raise RuntimeError(f"Could not resolve shell folder: {name}")
-
-    # ── shared popup stylesheet ───────────────────────────────────────────────
-    @staticmethod
-    def _popup_ss():
-        return """
-            QMessageBox { background-color: #1a0a2e; color: #ffffff; }
-            QMessageBox QLabel { color: #ffffff; font-size: 11px; }
-            QMessageBox QPushButton {
-                background-color: #332255; color: #00e0ff;
-                border: 1px solid #443366; border-radius: 4px;
-                padding: 4px 18px; font-weight: bold;
-            }
-            QMessageBox QPushButton:hover { background-color: #443366; }
-        """
-
-    def _make_lnk(self, lnk_path):
-        """Build the PowerShell snippet that creates a .lnk at lnk_path."""
-        script = os.path.abspath(__file__)
-        return (
-            f'$wsh = New-Object -ComObject WScript.Shell; '
-            f'$s = $wsh.CreateShortcut("{lnk_path}"); '
-            f'$s.TargetPath = "{self._pythonw}"; '
-            f'$s.Arguments = \'"{script}"\'; '
-            f'$s.WorkingDirectory = "{os.path.dirname(script)}"; '
-            f'$s.Description = "Tempest Weather Station Display"; '
-            f'$s.Save()'
-        )
-
-    def _show_popup(self, title, ok_text, detail_rows, flash_attr, success):
-        msg = QMessageBox(self)
-        msg.setStyleSheet(self._popup_ss())
-        msg.setWindowTitle(title)
-        msg.setIcon(QMessageBox.NoIcon)
-        if success:
-            msg.setText(f"<span style='color:#00e0ff;font-size:13px;font-weight:bold;'>"
-                        f"✔  {ok_text}</span>")
-            rows = "".join(
-                f"<tr><td style='color:#ff40a0;'><b>{k}</b></td>"
-                f"<td>&nbsp;{v}</td></tr>"
-                for k, v in detail_rows
-            )
-            msg.setInformativeText(
-                f"<table cellspacing='5' style='color:#cccccc;font-size:11px;'>"
-                f"{rows}</table>"
-            )
-        else:
-            msg.setText(f"<span style='color:#ff4040;font-size:13px;font-weight:bold;'>"
-                        f"✖  {ok_text}</span>")
-            msg.setInformativeText(
-                f"<span style='color:#cccccc;'>{detail_rows}</span>")
-        setattr(self, flash_attr, 6 if success else -6)
-        msg.exec_()
-        self.update()
-
-    def _create_shortcut(self):
-        script   = os.path.abspath(__file__)
-        desktop  = self._shell_folder("Desktop")
-        lnk_path = os.path.join(desktop, "Tempest Display.lnk")
-        ps = self._make_lnk(lnk_path)
-        try:
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                           check=True, capture_output=True)
-            self._show_popup("Shortcut Created",
-                             "Desktop shortcut created successfully.",
-                             [("Shortcut", lnk_path),
-                              ("Launches", self._pythonw),
-                              ("Script",   script)],
-                             "_shortcut_flash", True)
-        except Exception as e:
-            self._show_popup("Shortcut Failed",
-                             "Could not create the desktop shortcut.",
-                             str(e), "_shortcut_flash", False)
-
-    def _create_startup(self):
-        script      = os.path.abspath(__file__)
-        startup_dir = self._shell_folder("Startup")
-        lnk_path    = os.path.join(startup_dir, "TempestDot.lnk")
-        ps = self._make_lnk(lnk_path)
-        try:
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                           check=True, capture_output=True)
-            self._show_popup("Auto-start Enabled",
-                             "TempestDot will now start with Windows.",
-                             [("Startup folder", startup_dir),
-                              ("Shortcut",       lnk_path),
-                              ("Launches",       self._pythonw),
-                              ("Script",         script)],
-                             "_startup_flash", True)
-        except Exception as e:
-            self._show_popup("Auto-start Failed",
-                             "Could not add to the Startup folder.",
-                             str(e), "_startup_flash", False)
 
     # ── Paint ─────────────────────────────────────────────────────────────────
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+
+        p.fillRect(self.rect(), BG)
+
+        scale_x = self.width()  / CANVAS_W
+        scale_y = self.height() / CANVAS_H
+        self._scale = min(scale_x, scale_y)
+        self._x_off = (self.width()  - CANVAS_W * self._scale) / 2
+        self._y_off = (self.height() - CANVAS_H * self._scale) / 2
+
+        p.translate(self._x_off, self._y_off)
+        p.scale(self._scale, self._scale)
+
         y = 8
         y = self._draw_header(p, y)
         y = self._draw_forecast_clock(p, y)
@@ -375,59 +257,17 @@ class TempestWidget(QWidget):
 
     # ── Header ────────────────────────────────────────────────────────────────
     def _draw_header(self, p, y):
-        W = self.width()
+        W = CANVAS_W
 
-        icon_sz = 18
-
-        # ── Monitor / desktop shortcut icon ──────────────────────────────────
-        icon_x, icon_y = 8, y
-        self._shortcut_rect = QRectF(icon_x, icon_y, icon_sz, icon_sz)
-        sc = GREEN if self._shortcut_flash > 0 else (PINK if self._shortcut_flash < 0 else GREY)
-        if self._shortcut_flash != 0:
-            self._shortcut_flash += 1 if self._shortcut_flash < 0 else -1
-        cx, cy = icon_x + icon_sz / 2, icon_y + icon_sz / 2 - 1
-        p.setPen(QPen(sc, 1.5)); p.setBrush(Qt.NoBrush)
-        p.drawRoundedRect(int(cx - 7), int(cy - 5), 14, 10, 2, 2)
-        p.drawLine(int(cx), int(cy + 5), int(cx), int(cy + 8))
-        p.drawLine(int(cx - 4), int(cy + 8), int(cx + 4), int(cy + 8))
-        p.setPen(QPen(sc, 1))
-        p.drawLine(int(cx + 1), int(cy + 2), int(cx + 5), int(cy - 2))
-        p.drawLine(int(cx + 2), int(cy - 2), int(cx + 5), int(cy - 2))
-        p.drawLine(int(cx + 5), int(cy - 2), int(cx + 5), int(cy + 1))
-
-        # ── Startup / autostart icon (clock with up-arrow) ────────────────────
-        su_x = icon_x + icon_sz + 4
-        self._startup_rect = QRectF(su_x, icon_y, icon_sz, icon_sz)
-        su = GREEN if self._startup_flash > 0 else (PINK if self._startup_flash < 0 else GREY)
-        if self._startup_flash != 0:
-            self._startup_flash += 1 if self._startup_flash < 0 else -1
-        scx, scy = su_x + icon_sz / 2, icon_y + icon_sz / 2
-        # clock circle
-        p.setPen(QPen(su, 1.5)); p.setBrush(Qt.NoBrush)
-        p.drawEllipse(QPointF(scx, scy), 7, 7)
-        # clock hands (showing ~8 o'clock as "startup" hint)
-        p.setPen(QPen(su, 1.5))
-        p.drawLine(int(scx), int(scy), int(scx), int(scy - 4))       # 12 hand
-        p.drawLine(int(scx), int(scy), int(scx + 3), int(scy + 2))   # 3 hand
-        # small up-arrow on top-right of clock
-        p.setPen(QPen(CYAN, 1.5))
-        ax, ay = int(scx + 5), int(scy - 5)
-        p.drawLine(ax, ay + 4, ax, ay)
-        p.drawLine(ax - 2, ay + 2, ax, ay)
-        p.drawLine(ax + 2, ay + 2, ax, ay)
-
-        # Row 1: serial to the right of both icons
         serial = self.state.serial or "Tempest Station"
         p.setFont(QFont("Arial", 9))
         p.setPen(QPen(GREY))
-        p.drawText(su_x + icon_sz + 4, y, W - su_x - icon_sz - 30, 18,
-                   Qt.AlignLeft | Qt.AlignVCenter, serial)
+        p.drawText(8, y, W - 100, 18, Qt.AlignLeft | Qt.AlignVCenter, serial)
 
         p.setFont(QFont("Arial", 22, QFont.Bold))
         p.setPen(QPen(WHITE))
         p.drawText(0, y, W - 8, 26, Qt.AlignRight | Qt.AlignVCenter, "Tempest°")
 
-        # Row 2: unit toggle pill
         ty = y + 28
         btn_w = 84
         r = QRectF(8, ty, btn_w, 17)
@@ -439,6 +279,13 @@ class TempestWidget(QWidget):
         p.setPen(QPen(CYAN))
         label = "● METRIC" if self.state.metric else "● IMPERIAL"
         p.drawText(r.toRect(), Qt.AlignHCenter | Qt.AlignVCenter, label)
+
+        if self.state.last_update:
+            ts = self.state.last_update.strftime("%H:%M:%S")
+            p.setFont(QFont("Arial", 7))
+            p.setPen(QPen(GREY))
+            p.drawText(100, ty, W - 108, 17, Qt.AlignRight | Qt.AlignVCenter,
+                       f"updated {ts}")
 
         return ty + 20
 
@@ -463,7 +310,6 @@ class TempestWidget(QWidget):
             p.drawText(int(nx - 7), int(ny - 6), 14, 12, Qt.AlignHCenter,
                        str(h if h > 0 else 12))
 
-        # probability dots
         for h, prob in enumerate(self.state.forecast_hour_dots):
             angle = math.radians(h * 30 - 90)
             dr = r + 8
@@ -474,7 +320,6 @@ class TempestWidget(QWidget):
             p.setPen(Qt.NoPen)
             p.drawEllipse(QPointF(dx, dy), 4, 4)
 
-        # clock hands
         now = datetime.now()
         ha = math.radians((now.hour % 12 + now.minute / 60) * 30 - 90)
         ma = math.radians(now.minute * 6 - 90)
@@ -486,7 +331,7 @@ class TempestWidget(QWidget):
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPointF(cx, cy), 3, 3)
 
-        self._draw_weather_icon(p, self.width() - 120, y + 18, 110, 84)
+        self._draw_weather_icon(p, CANVAS_W - 120, y + 18, 110, 84)
         return y + 128
 
     def _draw_weather_icon(self, p, x, y, w, h):
@@ -500,7 +345,7 @@ class TempestWidget(QWidget):
                 ang = math.radians(a)
                 p.drawLine(int(cx + math.cos(ang)*24), int(cy + math.sin(ang)*24),
                            int(cx + math.cos(ang)*31), int(cy + math.sin(ang)*31))
-        elif cond == "rain":
+        elif cond in ("rain", "hail"):
             self._cloud(p, cx - 8, cy - 10, GREY, 30)
             p.setPen(QPen(CYAN, 2))
             for i in range(3):
@@ -522,7 +367,7 @@ class TempestWidget(QWidget):
 
     # ── Precipitation intensity ───────────────────────────────────────────────
     def _draw_precip_intensity(self, p, y):
-        W = self.width()
+        W = CANVAS_W
         unit = self.state.precip_unit
         p.setFont(QFont("Arial", 7)); p.setPen(QPen(GREY))
         p.drawText(10, y, W - 20, 14, Qt.AlignLeft,
@@ -535,7 +380,6 @@ class TempestWidget(QWidget):
         ox = (W - total_w) // 2
         oy = y + 28
 
-        # thresholds: light <2mm/hr, moderate <10mm/hr, heavy ≥10mm/hr
         max_rate = 20.0 if self.state.metric else 0.8
         rate = self.state.precip_rate_display
         rate_frac = min(1.0, rate / max_rate)
@@ -561,7 +405,7 @@ class TempestWidget(QWidget):
         p.drawText(10, y, 100, 14, Qt.AlignLeft, "uv index")
         p.drawText(160, y, 150, 14, Qt.AlignRight, "low ────── high ── extreme")
 
-        W = self.width()
+        W = CANVAS_W
         uv = self.state.uv_index
         n_dots, dot_r, gap = 20, 4, 3
         total_w = n_dots * (dot_r * 2 + gap)
@@ -579,7 +423,7 @@ class TempestWidget(QWidget):
 
     # ── Precipitation accumulation ────────────────────────────────────────────
     def _draw_precip_accum(self, p, y):
-        W = self.width()
+        W = CANVAS_W
         unit = self.state.precip_unit
         p.setFont(QFont("Arial", 7)); p.setPen(QPen(GREY))
         p.drawText(10, y, W - 20, 14, Qt.AlignLeft,
@@ -612,8 +456,12 @@ class TempestWidget(QWidget):
         p.drawText(10, y, 100, 14, Qt.AlignLeft, "conditions")
 
         icons = [
-            ("💧", "rain", CYAN), ("⚡", "thunder", YELLOW), ("❄", "snow", WHITE),
-            ("☁", "cloudy", GREY), ("⛅", "partly", YELLOW), ("☀", "clear", YELLOW),
+            ("💧", "rain",    CYAN),
+            ("⚡", "thunder", YELLOW),
+            ("❄",  "snow",   WHITE),
+            ("☁",  "cloudy", GREY),
+            ("⛅", "partly", YELLOW),
+            ("☀",  "clear",  YELLOW),
         ]
         for i, (sym, cond, color) in enumerate(icons):
             active = self.state.conditions == cond
@@ -625,7 +473,7 @@ class TempestWidget(QWidget):
 
     # ── Humidity dial + Wind compass ──────────────────────────────────────────
     def _draw_humidity_wind(self, p, y):
-        W = self.width()
+        W = CANVAS_W
         p.setFont(QFont("Arial", 7)); p.setPen(QPen(GREY))
         p.drawText(10, y, 100, 14, Qt.AlignLeft, "humidity")
         p.drawText(10, y, W - 14, 14, Qt.AlignRight, "wind\ndirection")
@@ -655,7 +503,6 @@ class TempestWidget(QWidget):
         p.setFont(QFont("Arial", 8)); p.setPen(QPen(GREY))
         p.drawText(int(cx-10), int(cy+8), 20, 12, Qt.AlignHCenter, "%")
 
-        # compass — right side, centred in right half
         cx2, cy2, r2 = W - 90, y + 68, 48
         p.setPen(QPen(GREY, 1)); p.setBrush(Qt.NoBrush)
         p.drawEllipse(QPointF(cx2, cy2), r2, r2)
@@ -695,7 +542,7 @@ class TempestWidget(QWidget):
             max_v = 55
             ticks = [(t, str(t)) for t in [2, 4, 6, 8, 10, 15, 20, 25, 30, 40, 50]]
 
-        W = self.width()
+        W = CANVAS_W
         scale_w = W - 40
         rect = QRectF(20, y + 22, scale_w, 28)
         draw_tick_scale(p, rect, 0, max_v, self.state.wind_display, ticks, CYAN)
@@ -712,7 +559,7 @@ class TempestWidget(QWidget):
 
     # ── Barometric pressure + Moon ────────────────────────────────────────────
     def _draw_pressure_moon(self, p, y):
-        W = self.width()
+        W = CANVAS_W
         p.setFont(QFont("Arial", 7)); p.setPen(QPen(GREY))
         p.drawText(10, y, 160, 14, Qt.AlignLeft, "barometric pressure")
         p.drawText(10, y, W - 14, 14, Qt.AlignRight, "moon phase")
@@ -729,15 +576,11 @@ class TempestWidget(QWidget):
         p.setFont(QFont("Arial", 7)); p.setPen(QPen(GREY))
         p.drawText(10, y+50, 80, 12, Qt.AlignLeft, self.state.pressure_unit)
 
-        # moon phase dots — full cycle: new(0) → full(0.5) → new(1.0)
         known_new = 1704854400  # 2024-01-11 11:57 UTC — verified new moon
         lunar_period = 29.530589 * 86400
         raw_frac = ((time.time() - known_new) % lunar_period) / lunar_period
-
-        # illumination 0=new, 1=full, back to 0
         illum = (1 - math.cos(raw_frac * 2 * math.pi)) / 2
 
-        # phase name
         if raw_frac < 0.025 or raw_frac >= 0.975:
             phase_name = "New Moon"
         elif raw_frac < 0.25:
@@ -771,7 +614,6 @@ class TempestWidget(QWidget):
             lx = mx + frac * span
             p.drawText(int(lx-10), int(moy+12), 20, 12, Qt.AlignHCenter, lbl)
 
-        # phase name + illumination %
         p.setFont(QFont("Arial", 6, QFont.Bold)); p.setPen(QPen(YELLOW))
         p.drawText(mx - 2, int(moy+24), int(span+dot_r), 12,
                    Qt.AlignHCenter, f"{phase_name}  {illum*100:.0f}%")
@@ -789,7 +631,7 @@ class TempestWidget(QWidget):
         else:
             temp_stops = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
 
-        W = self.width()
+        W = CANVAS_W
         n = len(temp_stops)
         dot_r, gap = 10, 4
         total_w = n * (dot_r * 2 + gap) - gap
@@ -828,21 +670,26 @@ class TempestWidget(QWidget):
 # Entry point
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
     app = QApplication(sys.argv)
+    app.setOverrideCursor(Qt.BlankCursor)
+
     state = WeatherState()
 
-    # demo seed values (SI)
-    state.wind_ms       = 4.0    # ≈ 14.4 km/h / 8.9 mph
-    state.gust_ms       = 6.9    # ≈ 24.8 km/h / 15.4 mph
-    state.wind_dir      = 225
-    state.temp_c        = 18.5
-    state.humidity      = 62.0
-    state.pressure_mb   = 1012.5
-    state.precip_rate_mmhr = 0.0
-    state.precip_mm     = 3.0
-    state.uv_index      = 3.0
-    state.conditions    = "partly"
-    state.forecast_hour_dots = [0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.6, 0.4, 0.2, 0.1, 0.1, 0.05]
+    # demo seed values — replaced immediately when real UDP data arrives
+    state.wind_ms            = 4.0
+    state.gust_ms            = 6.9
+    state.wind_dir           = 225
+    state.temp_c             = 18.5
+    state.humidity           = 62.0
+    state.pressure_mb        = 1012.5
+    state.precip_rate_mmhr   = 0.0
+    state.precip_mm          = 3.0
+    state.uv_index           = 3.0
+    state.conditions         = "partly"
+    state.forecast_hour_dots = [0.1, 0.2, 0.3, 0.5, 0.7, 0.8,
+                                 0.6, 0.4, 0.2, 0.1, 0.1, 0.05]
 
     widget = TempestWidget(state)
 
@@ -854,7 +701,7 @@ def main():
     timer.timeout.connect(widget.update)
     timer.start(1000)
 
-    widget.show()
+    widget.showFullScreen()
     sys.exit(app.exec_())
 
 
